@@ -1,95 +1,98 @@
 import tkinter as tk
 
-class AppWindow(tk.Toplevel):
-    def __init__(self, master, title="Application", width=600, height=400):
-        super().__init__(master)
-        self.geometry(f"{width}x{height}+150+120")
+class Window(tk.Toplevel):
+    def __init__(self, parent, title="Window", width=400, height=300, x=100, y=100):
+        super().__init__(parent)
         self.title(title)
-        self.overrideredirect(True)
-        
-        self.dragx = 0
-        self.dragy = 0
-        self.is_maximized = False
-        self.normal_geometry = f"{width}x{height}+150+120"
+        self.geometry(f"{width}x{height}+{x}+{y}")
+        self.configure(bg="#1e1e2e")
+        self.overrideredirect(True)  # Hilangkan border bawaan OS
 
-        # Context Menu Window (Titlebar)
-        self.win_context_menu = tk.Menu(
-            self, tearoff=0, bg="#303030", fg="white", 
-            activebackground="#007acc", activeforeground="white", bd=1
+        self.parent_desktop = parent
+
+        # Frame utama dengan border tipis ala Catppuccin
+        self.main_frame = tk.Frame(self, bg="#1e1e2e", highlightbackground="#45475a", highlightthickness=1)
+        self.main_frame.pack(fill="both", expand=True)
+
+        # Custom Title Bar
+        self.title_bar = tk.Frame(self.main_frame, bg="#181825", height=30)
+        self.title_bar.pack(fill="x", side="top")
+        self.title_bar.pack_propagate(False)
+
+        # Label Judul
+        self.title_lbl = tk.Label(self.title_bar, text=title, fg="#cdd6f4", bg="#181825", font=("Helvetica", 9, "bold"))
+        self.title_lbl.pack(side="left", padx=10)
+
+        # Tombol Kontrol Jendela (Close, Maximize, Minimize)
+        btn_close = tk.Button(
+            self.title_bar, text="✕", fg="#cdd6f4", bg="#181825",
+            activebackground="#f38ba8", activeforeground="#11111b",
+            bd=0, width=3, font=("Helvetica", 9), command=self.close_window, cursor="hand2"
         )
-        self.win_context_menu.add_command(label=" Minimize", command=self.minimize)
-        self.win_context_menu.add_command(label=" Maximize / Restore", command=self.toggle_maximize)
-        self.win_context_menu.add_separator()
-        self.win_context_menu.add_command(label=" Tutup", command=self.destroy)
+        btn_close.pack(side="right", fill="y")
 
-        # Titlebar Custom
-        self.titlebar = tk.Frame(self, bg="#2b2b2b", height=30)
-        self.titlebar.pack(fill="x")
-        self.titlebar.pack_propagate(False)
+        btn_max = tk.Button(
+            self.title_bar, text="🗖", fg="#cdd6f4", bg="#181825",
+            activebackground="#313244", activeforeground="#ffffff",
+            bd=0, width=3, font=("Helvetica", 9), command=self.toggle_maximize, cursor="hand2"
+        )
+        btn_max.pack(side="right", fill="y")
 
-        self.label = tk.Label(self.titlebar, text=title, bg="#2b2b2b", fg="white", font=("Arial", 9, "bold"))
-        self.label.pack(side="left", padx=10)
+        btn_min = tk.Button(
+            self.title_bar, text="─", fg="#cdd6f4", bg="#181825",
+            activebackground="#313244", activeforeground="#ffffff",
+            bd=0, width=3, font=("Helvetica", 9), command=self.minimize_window, cursor="hand2"
+        )
+        btn_min.pack(side="right", fill="y")
 
-        # Control Buttons
-        close_btn = tk.Button(self.titlebar, text="✕", bg="#e63946", fg="white", bd=0, relief="flat", command=self.destroy)
-        close_btn.pack(side="right", fill="y", ipadx=12)
+        # Area Konten Aplikasi
+        self.content_area = tk.Frame(self.main_frame, bg="#1e1e2e")
+        self.content_area.pack(fill="both", expand=True)
 
-        self.max_btn = tk.Button(self.titlebar, text="□", bg="#2b2b2b", fg="white", bd=0, relief="flat", command=self.toggle_maximize)
-        self.max_btn.pack(side="right", fill="y", ipadx=12)
+        # Event Dragging Jendela
+        self.title_bar.bind("<Button-1>", self.start_move)
+        self.title_bar.bind("<B1-Motion>", self.do_move)
+        self.title_lbl.bind("<Button-1>", self.start_move)
+        self.title_lbl.bind("<B1-Motion>", self.do_move)
 
-        min_btn = tk.Button(self.titlebar, text="—", bg="#2b2b2b", fg="white", bd=0, relief="flat", command=self.minimize)
-        min_btn.pack(side="right", fill="y", ipadx=12)
+        # Status Maximize
+        self.is_maximized = False
+        self.normal_geometry = f"{width}x{height}+{x}+{y}"
 
-        # Body Window
-        self.body = tk.Frame(self, bg="#202020")
-        self.body.pack(fill="both", expand=True)
+        # Daftarkan ke Taskbar
+        if hasattr(parent, "taskbar") and parent.taskbar:
+            parent.taskbar.add_task(self, title)
 
-        # Bind Klik Kanan (<Button-3>) di Titlebar
-        self.titlebar.bind("<Button-3>", self.show_win_context_menu)
-        self.label.bind("<Button-3>", self.show_win_context_menu)
-
-        # Drag Event
-        self.titlebar.bind("<Button-1>", self.start_move)
-        self.titlebar.bind("<B1-Motion>", self.move)
-        self.label.bind("<Button-1>", self.start_move)
-        self.label.bind("<B1-Motion>", self.move)
-
-        if hasattr(self.master, 'taskbar'):
-            self.master.taskbar.add_app(self)
-
-    def show_win_context_menu(self, event):
-        self.win_context_menu.tk_popup(event.x_root, event.y_root)
+        self.protocol("WM_DELETE_WINDOW", self.close_window)
 
     def start_move(self, event):
-        if not self.is_maximized:
-            self.dragx = event.x
-            self.dragy = event.y
+        self.x = event.x
+        self.y = event.y
 
-    def move(self, event):
+    def do_move(self, event):
         if not self.is_maximized:
-            x = self.winfo_x() + event.x - self.dragx
-            y = self.winfo_y() + event.y - self.dragy
+            deltax = event.x - self.x
+            deltay = event.y - self.y
+            x = self.winfo_x() + deltax
+            y = self.winfo_y() + deltay
             self.geometry(f"+{x}+{y}")
-
-    def minimize(self):
-        self.withdraw()
 
     def toggle_maximize(self):
         if not self.is_maximized:
             self.normal_geometry = self.geometry()
             screen_w = self.winfo_screenwidth()
-            screen_h = self.winfo_screenheight()
-            taskbar_h = 42
-            
-            self.geometry(f"{screen_w}x{screen_h - taskbar_h}+0+0")
+            screen_h = self.winfo_screenheight() - 40  # Kurangi tinggi taskbar
+            self.geometry(f"{screen_w}x{screen_h}+0+0")
             self.is_maximized = True
-            self.max_btn.config(text="❐")
         else:
             self.geometry(self.normal_geometry)
             self.is_maximized = False
-            self.max_btn.config(text="□")
 
-    def destroy(self):
-        if hasattr(self.master, 'taskbar'):
-            self.master.taskbar.remove_app(self)
-        super().destroy()
+    def minimize_window(self):
+        self.withdraw()
+
+    def close_window(self):
+        if hasattr(self.parent_desktop, "taskbar") and self.parent_desktop.taskbar:
+            self.parent_desktop.taskbar.remove_task(self)
+        self.destroy()
+

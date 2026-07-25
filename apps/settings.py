@@ -1,190 +1,256 @@
-from window import AppWindow
 import tkinter as tk
-import time
+import threading
 
-class Settings(AppWindow):
-    def __init__(self, master):
-        super().__init__(master, "Pengaturan - GeminiOS", 750, 500)
-        self.desktop_ref = master
+# Import updater secara aman
+try:
+    from updater import check_for_updates, apply_updates
+except ImportError:
+    def check_for_updates(): return False
+    def apply_updates(): return False
 
-        # Versi OS saat ini
-        self.current_version = "v1.0.0"
+class Settings:
+    def __init__(self, parent=None):
+        self.parent = parent
+        self._is_maximized = False
+        self._prev_geometry = "580x380+50+50"
 
-        # Container Utama (Material Dark Surface)
-        main_container = tk.Frame(self.body, bg="#121212")
-        main_container.pack(fill="both", expand=True)
+        # ------------------- MODE WADAH WINDOW (DESKTOP / STANDALONE) -------------------
+        if isinstance(parent, (tk.Tk, tk.Toplevel)) or parent is None:
+            if parent is None or isinstance(parent, tk.Tk):
+                self.win = tk.Toplevel(parent) if parent else tk.Tk()
+            else:
+                self.win = parent
+            
+            self.win.title("Pengaturan")
+            self.win.geometry("580x380")
+            self.win.configure(bg="#1e1e2e")
+            self.win.overrideredirect(True) # Hilangkan border bawaan HP
 
-        # -----------------------------------------------------------------
-        # SIDEBAR LEFT
-        # -----------------------------------------------------------------
-        self.sidebar = tk.Frame(main_container, bg="#1e1e24", width=210)
+            # ------------------- TITLEBAR DRAGGABLE -------------------
+            self.title_bar = tk.Frame(self.win, bg="#11111b", height=32)
+            self.title_bar.pack(fill="x", side="top")
+            self.title_bar.pack_propagate(False)
+
+            # Judul Window
+            lbl_title = tk.Label(self.title_bar, text="⚙️ Pengaturan", fg="#cdd6f4", bg="#11111b", font=("Helvetica", 9, "bold"))
+            lbl_title.pack(side="left", padx=10)
+
+            # 1. Tombol Close (✕)
+            btn_close = tk.Button(
+                self.title_bar, text="✕", fg="#ffffff", bg="#f38ba8", activebackground="#e85d75",
+                bd=0, padx=12, cursor="hand2", command=self.close_window, font=("Helvetica", 9, "bold")
+            )
+            btn_close.pack(side="right", fill="y")
+
+            # 2. Tombol Maximize / Restore (□ / ❐)
+            self.btn_max = tk.Button(
+                self.title_bar, text="□", fg="#cdd6f4", bg="#11111b", activebackground="#313244", activeforeground="#ffffff",
+                bd=0, padx=10, cursor="hand2", command=self.toggle_maximize, font=("Helvetica", 9, "bold")
+            )
+            self.btn_max.pack(side="right", fill="y")
+
+            # 3. Tombol Minimize (─)
+            btn_min = tk.Button(
+                self.title_bar, text="─", fg="#cdd6f4", bg="#11111b", activebackground="#313244", activeforeground="#ffffff",
+                bd=0, padx=10, cursor="hand2", command=self.minimize_window, font=("Helvetica", 9, "bold")
+            )
+            btn_min.pack(side="right", fill="y")
+
+            # Event Binding Drag & Double Click Titlebar
+            self.title_bar.bind("<ButtonPress-1>", self.start_drag)
+            self.title_bar.bind("<B1-Motion>", self.do_drag)
+            self.title_bar.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
+            lbl_title.bind("<ButtonPress-1>", self.start_drag)
+            lbl_title.bind("<B1-Motion>", self.do_drag)
+            lbl_title.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
+
+            self.container = tk.Frame(self.win, bg="#1e1e2e")
+            self.container.pack(fill="both", expand=True)
+        else:
+            # Mode Integrasi GeminiOS (Dikontrol oleh window.py)
+            self.container = tk.Frame(self.parent, bg="#1e1e2e")
+            self.container.pack(fill="both", expand=True)
+
+        # ------------------- SIDEBAR (KIRI) -------------------
+        self.sidebar = tk.Frame(self.container, bg="#181825", width=160)
         self.sidebar.pack(side="left", fill="y")
         self.sidebar.pack_propagate(False)
 
-        # Title Header
-        tk.Label(
-            self.sidebar, text="GeminiOS", bg="#1e1e24", fg="#8ab4f8",
-            font=("Arial", 12, "bold"), anchor="w", padx=16, pady=18
-        ).pack(fill="x")
+        lbl_sidebar_title = tk.Label(
+            self.sidebar, text="⚙️ Pengaturan", 
+            font=("Helvetica", 11, "bold"), fg="#cdd6f4", bg="#181825"
+        )
+        lbl_sidebar_title.pack(pady=(15, 12), padx=12, anchor="w")
 
-        # Area Konten Kanan
-        self.content_area = tk.Frame(main_container, bg="#121212")
-        self.content_area.pack(side="right", fill="both", expand=True, padx=20, pady=15)
+        self.btn_sys = self.create_sidebar_btn("🖥️ Sistem", self.show_sistem)
+        self.btn_update = self.create_sidebar_btn("ℹ️ Update OS", self.show_update)
 
-        self.nav_buttons = {}
+        # ------------------- CONTENT AREA (KANAN) -------------------
+        self.content_area = tk.Frame(self.container, bg="#1e1e2e")
+        self.content_area.pack(side="right", fill="both", expand=True, padx=15, pady=15)
 
-        # Daftar Menu Navigasi
-        self.add_nav_item("🎨  Tampilan", self.show_appearance_page)
-        self.add_nav_item("⚙️  Sistem", self.show_system_page)
-        self.add_nav_item("ℹ️  Tentang OS & Update", self.show_about_page)
+        # Tampilkan Tab Sistem secara default
+        self.show_sistem()
 
-        # Halaman Default
-        self.switch_page("🎨  Tampilan", self.show_appearance_page)
+    # ------------------- FUNGSI KONTROL JENDELA -------------------
+    def start_drag(self, event):
+        if not self._is_maximized:
+            self._drag_x = event.x
+            self._drag_y = event.y
 
-    def add_nav_item(self, text, command):
+    def do_drag(self, event):
+        if not self._is_maximized:
+            x = self.win.winfo_x() + (event.x - self._drag_x)
+            y = self.win.winfo_y() + (event.y - self._drag_y)
+            self.win.geometry(f"+{x}+{y}")
+
+    def minimize_window(self):
+        if hasattr(self, 'win'):
+            self.win.withdraw()  # Meminimalkan/menyembunyikan window
+
+    def toggle_maximize(self):
+        if not hasattr(self, 'win'):
+            return
+        if self._is_maximized:
+            # Restore ke ukuran semula
+            self.win.geometry(self._prev_geometry)
+            self._is_maximized = False
+            self.btn_max.config(text="□")
+        else:
+            # Maximize memenuhi layar
+            self._prev_geometry = self.win.geometry()
+            sw = self.win.winfo_screenwidth()
+            sh = self.win.winfo_screenheight()
+            self.win.geometry(f"{sw}x{sh}+0+0")
+            self._is_maximized = True
+            self.btn_max.config(text="❐")
+
+    def close_window(self):
+        if hasattr(self, 'win'):
+            self.win.destroy()
+
+    def create_sidebar_btn(self, text, command):
         btn = tk.Button(
-            self.sidebar, text=text, bg="#1e1e24", fg="#bdc1c6",
-            activebackground="#2a2b32", activeforeground="#8ab4f8",
-            bd=0, relief="flat", anchor="w", font=("Arial", 10),
-            padx=16, pady=10, command=lambda: self.switch_page(text, command)
+            self.sidebar, text=text, font=("Helvetica", 10),
+            fg="#a6adc8", bg="#181825", activeforeground="#cdd6f4", activebackground="#313244",
+            bd=0, anchor="w", padx=12, pady=8, cursor="hand2", command=command
         )
         btn.pack(fill="x", pady=2)
-        self.nav_buttons[text] = btn
+        return btn
 
-    def switch_page(self, title, page_func):
-        for name, btn in self.nav_buttons.items():
-            if name == title:
-                btn.config(bg="#2d2f39", fg="#8ab4f8", font=("Arial", 10, "bold"))
-            else:
-                btn.config(bg="#1e1e24", fg="#bdc1c6", font=("Arial", 10))
+    def clear_content(self):
+        for widget in self.content_area.winfo_children():
+            widget.destroy()
 
-        for child in self.content_area.winfo_children():
-            child.destroy()
+    # ------------------- TAB 1: SISTEM (Info Ala Ubuntu) -------------------
+    def show_sistem(self):
+        self.clear_content()
 
-        page_func()
+        title = tk.Label(self.content_area, text="Tentang Sistem", font=("Helvetica", 13, "bold"), fg="#cdd6f4", bg="#1e1e2e")
+        title.pack(anchor="w", pady=(0, 10))
 
-    def create_card(self, title, desc=""):
-        card = tk.Frame(self.content_area, bg="#1e1e24", bd=0, relief="flat")
-        card.pack(fill="x", pady=8, ipady=6)
+        card = tk.Frame(self.content_area, bg="#313244", padx=20, pady=15)
+        card.pack(fill="both", expand=True)
 
-        tk.Label(
-            card, text=title, bg="#1e1e24", fg="#e8eaed",
-            font=("Arial", 10, "bold"), anchor="w"
-        ).pack(fill="x", padx=14, pady=(10, 2))
+        lbl_icon = tk.Label(card, text="💻", font=("Segoe UI Emoji", 30), bg="#313244")
+        lbl_icon.pack(pady=(2, 2))
 
-        if desc:
-            tk.Label(
-                card, text=desc, bg="#1e1e24", fg="#9aa0a6",
-                font=("Arial", 9), anchor="w"
-            ).pack(fill="x", padx=14, pady=(0, 8))
+        lbl_os_name = tk.Label(card, text="GeminiOS Desktop", font=("Helvetica", 12, "bold"), fg="#89b4fa", bg="#313244")
+        lbl_os_name.pack(pady=(0, 10))
 
-        return card
+        specs_frame = tk.Frame(card, bg="#1e1e2e", padx=12, pady=10)
+        specs_frame.pack(fill="x", pady=2)
 
-    # -----------------------------------------------------------------
-    # HALAMAN 1: TAMPILAN
-    # -----------------------------------------------------------------
-    def show_appearance_page(self):
-        tk.Label(
-            self.content_area, text="Tampilan & Warna", bg="#121212", fg="#8ab4f8",
-            font=("Arial", 14, "bold"), anchor="w"
-        ).pack(fill="x", pady=(0, 10))
+        def add_spec_row(parent, label, value):
+            row = tk.Frame(parent, bg="#1e1e2e")
+            row.pack(fill="x", pady=3)
+            lbl_key = tk.Label(row, text=label, font=("Helvetica", 9, "bold"), fg="#a6adc8", bg="#1e1e2e", width=14, anchor="w")
+            lbl_key.pack(side="left")
+            lbl_val = tk.Label(row, text=value, font=("Helvetica", 9), fg="#cdd6f4", bg="#1e1e2e", anchor="w")
+            lbl_val.pack(side="left", fill="x", expand=True)
 
-        card_bg = self.create_card("Warna Background Desktop", "Ubah warna wallpaper desktop secara langsung")
-        palette_frame = tk.Frame(card_bg, bg="#1e1e24")
-        palette_frame.pack(fill="x", padx=14, pady=8)
+        add_spec_row(specs_frame, "Versi OS", "v1.0.0 (Stable)")
+        add_spec_row(specs_frame, "Lingkungan", "Termux X11 / Python Tkinter")
+        add_spec_row(specs_frame, "Pembuat", "marcellyosi75-coder")
+        add_spec_row(specs_frame, "Arsitektur", "ARM64 / Linux")
 
-        colors = [
-            ("#1d3557", "Default Blue"),
-            ("#121212", "Dark Void"),
-            ("#2d3748", "Slate Gray"),
-            ("#3c1361", "Deep Purple"),
-            ("#0f3460", "Midnight Navy")
-        ]
-
-        for hex_code, name in colors:
-            btn = tk.Button(
-                palette_frame, text=name, bg=hex_code, fg="white",
-                bd=0, relief="flat", font=("Arial", 8, "bold"),
-                padx=10, pady=6,
-                command=lambda c=hex_code: self.change_desktop_bg(c)
-            )
-            btn.pack(side="left", padx=4, pady=4)
-
-    def change_desktop_bg(self, color):
-        if hasattr(self.desktop_ref, 'desktop'):
-            self.desktop_ref.desktop.config(bg=color)
-
-    # -----------------------------------------------------------------
-    # HALAMAN 2: SISTEM
-    # -----------------------------------------------------------------
-    def show_system_page(self):
-        tk.Label(
-            self.content_area, text="Sistem Perangkat", bg="#121212", fg="#8ab4f8",
-            font=("Arial", 14, "bold"), anchor="w"
-        ).pack(fill="x", pady=(0, 10))
-
-        w = self.winfo_screenwidth()
-        h = self.winfo_screenheight()
-        self.create_card("Resolusi Layar", f"Display Server: {w} x {h} Pixels")
-        self.create_card("Lingkungan Eksekusi", "Termux:X11 + Python Tkinter Subsystem Engine")
-
-    # -----------------------------------------------------------------
-    # HALAMAN 3: TENTANG OS & SYSTEM UPDATE (FITUR BARU)
-    # -----------------------------------------------------------------
-    def show_about_page(self):
-        tk.Label(
-            self.content_area, text="Tentang OS & Pembaruan", bg="#121212", fg="#8ab4f8",
-            font=("Arial", 14, "bold"), anchor="w"
-        ).pack(fill="x", pady=(0, 10))
-
-        # Card Informasi OS
-        card_about = self.create_card("GeminiOS Desktop Environment", f"Versi Terpasang: {self.current_version}")
-        info_text = (
-            "• Subsystem Engine: Python 3 & Tkinter\n"
-            "• UI Framework: Custom Material Dark UI\n"
-            "• Target Host: Termux X11 Server"
-        )
-        tk.Label(
-            card_about, text=info_text, bg="#1e1e24", fg="#bdc1c6",
-            font=("Arial", 9), justify="left", anchor="w"
-        ).pack(fill="x", padx=14, pady=(2, 10))
-
-        # Card Pembaruan Sistem (Update Manager)
-        card_update = self.create_card("Pembaruan Sistem (Software Update)", "Periksa repositori untuk mendapatkan fitur terbaru")
-
-        update_frame = tk.Frame(card_update, bg="#1e1e24")
-        update_frame.pack(fill="x", padx=14, pady=5)
-
-        self.update_btn = tk.Button(
-            update_frame, text="🔄  Cek Pembaruan", bg="#007acc", fg="white",
-            activebackground="#005999", activeforeground="white",
-            bd=0, relief="flat", font=("Arial", 9, "bold"), padx=12, pady=6,
-            command=self.check_for_updates
-        )
-        self.update_btn.pack(side="left", pady=5)
-
-        self.update_status = tk.Label(
-            update_frame, text="Sistem Anda siap diperbarui.", bg="#1e1e24", fg="#bdc1c6",
-            font=("Arial", 9)
-        )
-        self.update_status.pack(side="left", padx=15)
-
-    def check_for_updates(self):
-        """Simulasi Proses Update Berbasis Repositori Linux"""
-        self.update_btn.config(state="disabled", bg="#404040")
+    # ------------------- TAB 2: UPDATE OS -------------------
+    def show_update(self):
+        self.clear_content()
         
-        # Langkah 1: Menghubungkan ke Repo
-        self.update_status.config(text="[1/3] Menghubungkan ke repositori server...", fg="#8ab4f8")
-        self.update_idletasks()
-        self.after(1200, self._update_step2)
+        title = tk.Label(self.content_area, text="Pembaruan Sistem", font=("Helvetica", 13, "bold"), fg="#cdd6f4", bg="#1e1e2e")
+        title.pack(anchor="w", pady=(0, 10))
 
-    def _update_step2(self):
-        # Langkah 2: Memeriksa Manifest/Versi
-        self.update_status.config(text="[2/3] Membandingkan manifest paket lokal vs server...", fg="#8ab4f8")
-        self.update_idletasks()
-        self.after(1500, self._update_step3)
+        card = tk.Frame(self.content_area, bg="#313244", padx=20, pady=20)
+        card.pack(fill="both", expand=True)
 
-    def _update_step3(self):
-        # Langkah 3: Hasil Pemeriksaan
-        self.update_status.config(text="✓ GeminiOS sudah menggunakan versi terbaru (v1.0.0).", fg="#81c784")
-        self.update_btn.config(state="normal", bg="#007acc")
+        lbl_update_icon = tk.Label(card, text="🔄", font=("Segoe UI Emoji", 24), bg="#313244")
+        lbl_update_icon.pack(pady=(0, 5))
+
+        lbl_update_title = tk.Label(card, text="Pembaruan Perangkat Lunak", font=("Helvetica", 11, "bold"), fg="#cdd6f4", bg="#313244")
+        lbl_update_title.pack(pady=(0, 8))
+
+        self.lbl_status = tk.Label(
+            card, 
+            text="Tekan tombol di bawah untuk memeriksa versi terbaru dari server.", 
+            font=("Helvetica", 10), fg="#a6adc8", bg="#313244", wraplength=320, justify="center"
+        )
+        self.lbl_status.pack(pady=12)
+
+        self.btn_check = tk.Button(
+            card, text="Cek Pembaruan", font=("Helvetica", 10, "bold"),
+            bg="#89b4fa", fg="#11111b", activebackground="#74c7ec",
+            bd=0, padx=18, pady=8, cursor="hand2", command=self.on_check_update
+        )
+        self.btn_check.pack(pady=5)
+
+    def on_check_update(self):
+        self.lbl_status.config(text="Memeriksa pembaruan dari server...", fg="#89b4fa")
+        self.btn_check.config(state="disabled")
+
+        def worker():
+            try:
+                has_update = check_for_updates()
+                if has_update:
+                    self.lbl_status.config(text="✨ Pembaruan baru tersedia di server!", fg="#fab387")
+                    self.btn_check.config(
+                        state="normal", text="Pasang Sekarang", bg="#a6e3a1", command=self.on_apply_update
+                    )
+                else:
+                    self.lbl_status.config(text="✅ Sistem Anda sudah menggunakan versi terbaru.", fg="#a6e3a1")
+                    self.btn_check.config(
+                        state="normal", text="Cek Pembaruan", bg="#89b4fa", command=self.on_check_update
+                    )
+            except Exception as e:
+                self.lbl_status.config(text="Terjadi kesalahan koneksi.", fg="#f38ba8")
+                self.btn_check.config(state="normal", text="Cek Pembaruan")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def on_apply_update(self):
+        self.lbl_status.config(text="Sedang mengunduh pembaruan...", fg="#89b4fa")
+        self.btn_check.config(state="disabled")
+
+        def worker():
+            try:
+                success = apply_updates()
+                if success:
+                    self.lbl_status.config(text="✅ Berhasil diperbarui! Silakan restart aplikasi.", fg="#a6e3a1")
+                    self.btn_check.config(state="disabled", text="Terpasang", bg="#45475a")
+                else:
+                    self.lbl_status.config(text="❌ Gagal mengunduh pembaruan.", fg="#f38ba8")
+                    self.btn_check.config(
+                        state="normal", text="Coba Lagi", bg="#f38ba8", command=self.on_apply_update
+                    )
+            except Exception as e:
+                self.lbl_status.config(text="Terjadi kesalahan saat menginstal.", fg="#f38ba8")
+                self.btn_check.config(state="normal", text="Coba Lagi")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+# Alias
+SettingsApp = Settings
+
+if __name__ == "__main__":
+    app = Settings()
+    app.win.mainloop()

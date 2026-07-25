@@ -1,8 +1,8 @@
-from window import AppWindow
+from window import Window
 import tkinter as tk
 import os
 
-class Explorer(AppWindow):
+class FileExplorer(Window):
 
     def __init__(self, master):
         super().__init__(master, "Explorer")

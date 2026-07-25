@@ -1,34 +1,52 @@
 import tkinter as tk
 from apps.notepad import Notepad
-from apps.explorer import Explorer
+from apps.file_explorer import FileExplorer
 from apps.settings import Settings
+from apps.task_manager import TaskManager
 
-class StartMenu:
-    def __init__(self, master):
-        self.master = master
-        self.visible = False
-        self.frame = tk.Frame(master, width=220, height=300, bg="#303030")
-        self.frame.pack_propagate(False)
+class StartMenu(tk.Frame):
+    def __init__(self, parent):
+        super().__init__(parent, bg="#11111b", highlightbackground="#45475a", highlightthickness=1)
+        self.desktop_parent = parent
+        
+        header_lbl = tk.Label(
+            self, text="GeminiOS Apps", fg="#cdd6f4", bg="#11111b", 
+            font=("Helvetica", 10, "bold")
+        )
+        header_lbl.pack(anchor="w", padx=15, pady=(15, 10))
 
-        # Tombol Aplikasi
-        tk.Button(self.frame, text="Notepad", bg="#404040", fg="white", anchor="w",
-                  command=lambda: [Notepad(master), self.toggle()]).pack(fill="x", padx=5, pady=2)
-        tk.Button(self.frame, text="Explorer", bg="#404040", fg="white", anchor="w",
-                  command=lambda: [Explorer(master), self.toggle()]).pack(fill="x", padx=5, pady=2)
-        tk.Button(self.frame, text="Settings", bg="#404040", fg="white", anchor="w",
-                  command=lambda: [Settings(master), self.toggle()]).pack(fill="x", padx=5, pady=2)
+        sep = tk.Frame(self, bg="#313244", height=1)
+        sep.pack(fill="x", padx=10, pady=5)
 
-    def toggle(self):
-        if self.visible:
-            self.frame.place_forget()
-            self.visible = False
-        else:
-            # Gunakan winfo_screenheight() agar akurat mengambil tinggi layar total
-            screen_h = self.master.winfo_screenheight()
-            taskbar_h = 42
-            menu_h = 300
+        # Daftar Aplikasi di Menu Start
+        apps_list = [
+            ("📝 Notepad", self.open_notepad),
+            ("📁 File Explorer", self.open_file_explorer),
+            ("⚙️ Settings", self.open_settings),
+            ("📊 Task Manager", self.open_task_manager),
+        ]
 
-            y_pos = screen_h - taskbar_h - menu_h
-            self.frame.place(x=0, y=y_pos, width=220, height=menu_h)
-            self.frame.lift()  # Paksa berada di lapisan paling atas
-            self.visible = True
+        for name, cmd in apps_list:
+            btn = tk.Button(
+                self, text=name, fg="#cdd6f4", bg="#11111b", 
+                activebackground="#313244", activeforeground="#ffffff",
+                bd=0, anchor="w", padx=15, pady=8, cursor="hand2",
+                font=("Helvetica", 9), command=cmd
+            )
+            btn.pack(fill="x", padx=5, pady=2)
+
+    def open_notepad(self):
+        Notepad(self.desktop_parent)
+        self.destroy()
+
+    def open_file_explorer(self):
+        FileExplorer(self.desktop_parent)
+        self.destroy()
+
+    def open_settings(self):
+        Settings(self.desktop_parent)
+        self.destroy()
+
+    def open_task_manager(self):
+        TaskManager(self.desktop_parent)
+        self.destroy()

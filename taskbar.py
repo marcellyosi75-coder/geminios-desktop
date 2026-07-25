@@ -1,60 +1,63 @@
 import tkinter as tk
-import time
+from system_tray import SystemTray
 
 class Taskbar(tk.Frame):
-    def __init__(self, master):
-        super().__init__(master, bg="#202020", height=42)
+    def __init__(self, parent, on_start_click=None):
+        super().__init__(parent, bg="#11111b", height=40)
+        self.pack(side="bottom", fill="x")
         self.pack_propagate(False)
-        self.master = master
-        self.app_buttons = {}  # Menyimpan daftar tombol aplikasi aktif
 
-        # Tombol Start
-        self.start = tk.Button(
-            self, text="Start", width=8, bg="#303030", fg="white", bd=0, command=master.menu.toggle
+        self.on_start_click = on_start_click
+
+        # 1. Tombol Start Menu di Pojok Kiri
+        self.btn_start = tk.Button(
+            self, text="❖ Start", fg="#cdd6f4", bg="#1e1e2e", 
+            activebackground="#313244", activeforeground="#ffffff",
+            bd=0, padx=14, font=("Helvetica", 9, "bold"), cursor="hand2",
+            command=self.handle_start_click
         )
-        self.start.pack(side="left", padx=5, pady=5)
+        self.btn_start.pack(side="left", fill="y", padx=5, pady=5)
 
-        # Container khusus untuk tombol-tombol aplikasi yang sedang aktif
-        self.apps_container = tk.Frame(self, bg="#202020")
-        self.apps_container.pack(side="left", fill="both", expand=True, padx=5)
+        # 2. Container Area untuk Ikon Aplikasi yang Sedang Dibuka
+        self.app_icons_frame = tk.Frame(self, bg="#11111b")
+        self.app_icons_frame.pack(side="left", fill="y", padx=10, expand=True, anchor="w")
 
-        # Jam di sebelah kanan
-        self.clock = tk.Label(
-            self, bg="#202020", fg="white", font=("Arial", 10)
-        )
-        self.clock.pack(side="right", padx=10)
+        # 3. System Tray (Jam, Kalender Popup, & Indikator RAM) di Pojok Kanan
+        self.system_tray = SystemTray(self)
+        self.system_tray.pack(side="right", fill="y", padx=5)
 
-        self.update_clock()
+        # Kamus untuk menyimpan referensi tombol aplikasi di taskbar
+        self.task_buttons = {}
 
-    def update_clock(self):
-        self.clock.config(text=time.strftime("%H:%M:%S"))
-        self.after(1000, self.update_clock)
+    def handle_start_click(self):
+        if self.on_start_click:
+            self.on_start_click()
 
-    def add_app(self, window):
-        """Menambahkan tombol baru di taskbar saat aplikasi dibuka"""
+    def add_task(self, app_instance, title):
+        """Menambahkan tombol aplikasi ke taskbar saat dibuka"""
         btn = tk.Button(
-            self.apps_container,
-            text=window.title(),
-            bg="#3a3a3a",
-            fg="white",
-            bd=0,
-            padx=10,
-            command=lambda: self.toggle_window(window)
+            self.app_icons_frame, text=title, fg="#cdd6f4", bg="#313244",
+            activebackground="#45475a", activeforeground="#ffffff",
+            bd=0, padx=10, font=("Helvetica", 9), cursor="hand2",
+            command=lambda: self.toggle_window_focus(app_instance)
         )
-        btn.pack(side="left", padx=2, pady=5)
-        self.app_buttons[window] = btn
+        btn.pack(side="left", padx=3, pady=6)
+        self.task_buttons[app_instance] = btn
 
-    def remove_app(self, window):
-        """Menghapus tombol di taskbar saat aplikasi ditutup"""
-        if window in self.app_buttons:
-            self.app_buttons[window].destroy()
-            del self.app_buttons[window]
+    def remove_task(self, app_instance):
+        """Menghapus tombol dari taskbar saat aplikasi ditutup"""
+        if app_instance in self.task_buttons:
+            self.task_buttons[app_instance].destroy()
+            del self.task_buttons[app_instance]
 
-    def toggle_window(self, window):
-        """Minimize / Restore window saat tombol di taskbar diklik"""
-        if window.state() == "withdrawn" or not window.winfo_viewable():
-            window.deiconify()
-            window.lift()
-            window.focus_force()
-        else:
-            window.withdraw()
+    def toggle_window_focus(self, app_instance):
+        """Minimize/Restore atau bawa jendela ke depan saat tombol taskbar diklik"""
+        try:
+            if app_instance.winfo_viewable():
+                app_instance.withdraw() # Sembunyikan jika sedang aktif
+            else:
+                app_instance.deiconify() # Tampilkan kembali
+                app_instance.lift()      # Bawa ke depan
+        except Exception:
+            pass
+
