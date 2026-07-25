@@ -1,0 +1,9 @@
+from window import AppWindow
+import tkinter as tk
+
+class Notepad(AppWindow):
+
+    def __init__(self,master):
+        super().__init__(master,"Notepad",700,500)
+
+        tk.Text(self.body).pack(fill="both",expand=True)
